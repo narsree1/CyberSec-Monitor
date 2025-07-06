@@ -1,24 +1,4 @@
-# Connection tests with enhanced display
-    st.subheader("🔬 Service Tests")
-    
-    if st.button("🧪 Test All Connections"):
-        with st.spinner("Testing connections..."):
-            results = test_connections()
-            
-            st.markdown("### Test Results:")
-            
-            for service, result in results.items():
-                status_icon = "✅" if result['status'] else "❌"
-                service_name = service.replace('_', ' ').title()
-                
-                with st.container():
-                    col1, col2 = st.columns([1, 3])
-                    
-                    with col1:
-                        st.markdown(f"**{status_icon} {service_name}**")
-                    
-                    with col2:
-                        st.markdown(f"**Statusimport streamlit as st
+import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import os
@@ -769,7 +749,6 @@ def show_system_status(db):
     st.subheader("⚡ Performance Metrics")
     
     # Get database stats
-    db = get_database()
     total_articles = db.execute_query("SELECT COUNT(*) FROM articles", fetch=True)[0][0]
     processed_articles = db.execute_query("SELECT COUNT(*) FROM articles WHERE processed = 1", fetch=True)[0][0]
     
