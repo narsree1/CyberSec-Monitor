@@ -254,7 +254,7 @@ def test_anthropic_connection():
     
     try:
         response = anthropic_client.messages.create(
-            model="claude-3-sonnet-20240229",
+            model="claude-3-haiku-20240307",
             max_tokens=100,
             messages=[{"role": "user", "content": "Hello, this is a test of the cybersecurity article analysis system. Please confirm you can provide detailed technical analysis."}]
         )
