@@ -2,8 +2,6 @@ import os
 import json
 import logging
 from anthropic import Anthropic
-from app import db
-from models import Article
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -15,16 +13,34 @@ if not ANTHROPIC_API_KEY:
 
 anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
+def get_db():
+    """Get database instance - compatible with both Flask and Streamlit"""
+    try:
+        # Try Flask app context first
+        from app import db
+        return db
+    except (ImportError, RuntimeError):
+        # Fall back to simple database for Streamlit
+        return None
+
+def get_article_model():
+    """Get Article model - compatible with both Flask and Streamlit"""
+    try:
+        from models import Article
+        return Article
+    except ImportError:
+        return None
+
 def summarize_article(content, title=""):
     """
-    Summarize article content using Claude Haiku
+    Summarize article content using Claude
     """
     if not anthropic_client:
         logger.error("Anthropic client not initialized - API key missing")
         return None, None
     
     try:
-        # Truncate content if too long (Claude Haiku has context limits)
+        # Truncate content if too long
         max_content_length = 8000
         if len(content) > max_content_length:
             content = content[:max_content_length] + "..."
@@ -83,6 +99,13 @@ def process_new_articles():
     """Process unprocessed articles for summarization"""
     logger.info("Processing new articles for summarization...")
     
+    db = get_db()
+    Article = get_article_model()
+    
+    if not db or not Article:
+        logger.error("Database or Article model not available")
+        return 0
+    
     # Get unprocessed articles
     unprocessed_articles = Article.query.filter_by(processed=False).all()
     
@@ -111,7 +134,7 @@ def process_new_articles():
                 logger.info(f"Successfully processed: {article.title}")
             else:
                 logger.error(f"Failed to generate summary for: {article.title}")
-                # Don't mark as processed if it's a rate limit issue - leave for retry
+                # Don't mark as processed if it's a rate limit issue
                 if "rate limit" not in str(summary).lower():
                     article.processed = True
             
@@ -119,7 +142,7 @@ def process_new_articles():
             
             # Add delay to avoid rate limits
             import time
-            time.sleep(1)  # Claude Haiku is faster, so reduced delay
+            time.sleep(1)
             
         except Exception as e:
             db.session.rollback()
@@ -133,8 +156,11 @@ def process_new_articles():
     
     # Send notifications for processed articles
     if processed_count > 0:
-        from notification_service import send_notifications_for_new_articles
-        send_notifications_for_new_articles()
+        try:
+            from notification_service import send_notifications_for_new_articles
+            send_notifications_for_new_articles()
+        except ImportError:
+            logger.warning("Notification service not available")
     
     return processed_count
 
