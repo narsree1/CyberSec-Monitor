@@ -1,4 +1,24 @@
-import streamlit as st
+# Connection tests with enhanced display
+    st.subheader("🔬 Service Tests")
+    
+    if st.button("🧪 Test All Connections"):
+        with st.spinner("Testing connections..."):
+            results = test_connections()
+            
+            st.markdown("### Test Results:")
+            
+            for service, result in results.items():
+                status_icon = "✅" if result['status'] else "❌"
+                service_name = service.replace('_', ' ').title()
+                
+                with st.container():
+                    col1, col2 = st.columns([1, 3])
+                    
+                    with col1:
+                        st.markdown(f"**{status_icon} {service_name}**")
+                    
+                    with col2:
+                        st.markdown(f"**Statusimport streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import os
@@ -381,7 +401,7 @@ class BlogMonitorDB:
         return total_articles
     
     def process_articles_with_ai(self):
-        """Process unprocessed articles with AI summarization"""
+        """Process unprocessed articles with comprehensive AI analysis"""
         if not ANTHROPIC_AVAILABLE or not os.environ.get("ANTHROPIC_API_KEY"):
             logger.warning("Anthropic not available for processing")
             return 0
@@ -396,10 +416,16 @@ class BlogMonitorDB:
             
             processed_count = 0
             for article_id, title, content in unprocessed:
-                if len(content.strip()) < 100:
+                if len(content.strip()) < 200:  # Increased minimum content length
+                    # Mark as processed even if too short
+                    self.execute_query(
+                        "UPDATE articles SET processed = 1 WHERE id = ?",
+                        (article_id,)
+                    )
                     continue
                 
                 try:
+                    logger.info(f"Processing with AI: {title}")
                     summary, key_points = summarize_article(content, title)
                     
                     if summary and key_points:
@@ -408,17 +434,31 @@ class BlogMonitorDB:
                             (summary, key_points, article_id)
                         )
                         processed_count += 1
-                        time.sleep(1)  # Rate limiting
+                        logger.info(f"Successfully processed: {title}")
+                        time.sleep(2)  # Increased rate limiting for Sonnet
+                    else:
+                        logger.error(f"No analysis generated for: {title}")
                     
                 except Exception as e:
                     logger.error(f"Error processing article {title}: {e}")
             
-            logger.info(f"Processed {processed_count} articles with AI")
+            logger.info(f"Processed {processed_count} articles with comprehensive AI analysis")
             return processed_count
             
         except ImportError:
             logger.error("ai_service module not available")
             return 0
+    
+    def reprocess_single_article(self, article_id):
+        """Reprocess a single article with enhanced analysis"""
+        if not ANTHROPIC_AVAILABLE or not os.environ.get("ANTHROPIC_API_KEY"):
+            return False, "Anthropic not available"
+        
+        try:
+            from ai_service import reprocess_article
+            return reprocess_article(article_id, self)
+        except ImportError:
+            return False, "AI service not available"
 
 # Initialize database
 @st.cache_resource
@@ -426,38 +466,53 @@ def get_database():
     return BlogMonitorDB()
 
 def test_connections():
-    """Test all service connections"""
+    """Test all service connections with detailed feedback"""
     results = {}
     
-    # Test Anthropic
+    # Test Anthropic with comprehensive testing
     if ANTHROPIC_AVAILABLE and os.environ.get("ANTHROPIC_API_KEY"):
         try:
             from ai_service import test_anthropic_connection
             success, message = test_anthropic_connection()
-            results['anthropic'] = {'status': success, 'message': message}
+            results['anthropic'] = {
+                'status': success, 
+                'message': message,
+                'model': 'Claude Sonnet (Comprehensive Analysis)' if success else 'Connection Failed'
+            }
         except Exception as e:
-            results['anthropic'] = {'status': False, 'message': str(e)}
+            results['anthropic'] = {
+                'status': False, 
+                'message': str(e),
+                'model': 'Error'
+            }
     else:
-        results['anthropic'] = {'status': False, 'message': 'API key not configured'}
+        results['anthropic'] = {
+            'status': False, 
+            'message': 'API key not configured',
+            'model': 'Not Available'
+        }
     
     # Test scraping capability
     results['scraping'] = {
         'status': SCRAPING_AVAILABLE, 
-        'message': 'Web scraping libraries available' if SCRAPING_AVAILABLE else 'Missing libraries'
+        'message': 'Web scraping libraries available' if SCRAPING_AVAILABLE else 'Missing libraries',
+        'libraries': 'requests, beautifulsoup4, feedparser, trafilatura' if SCRAPING_AVAILABLE else 'Missing'
     }
     
     # Test email
     email_configured = bool(os.environ.get("EMAIL_ADDRESS") and os.environ.get("EMAIL_PASSWORD"))
     results['email'] = {
         'status': email_configured,
-        'message': 'Email configured' if email_configured else 'Email not configured'
+        'message': 'Email configured' if email_configured else 'Email not configured',
+        'smtp': os.environ.get("SMTP_SERVER", "smtp.gmail.com")
     }
     
     # Test Twilio
     twilio_configured = bool(os.environ.get("TWILIO_ACCOUNT_SID") and os.environ.get("TWILIO_AUTH_TOKEN"))
     results['twilio'] = {
         'status': twilio_configured,
-        'message': 'Twilio configured' if twilio_configured else 'Twilio not configured'
+        'message': 'Twilio configured' if twilio_configured else 'Twilio not configured',
+        'service': 'WhatsApp notifications' if twilio_configured else 'Not available'
     }
     
     return results
@@ -546,21 +601,68 @@ def show_dashboard(db):
     with col4:
         st.metric("Active Sources", stats['sources'])
     
-    # Recent articles
-    st.subheader("Recent Articles")
+    # Recent articles with enhanced display
+    st.subheader("📈 Recent Articles")
     recent_articles = db.execute_query(
-        "SELECT title, source, url, summary, scraped_date FROM articles ORDER BY scraped_date DESC LIMIT 5",
+        "SELECT title, source, url, summary, key_points, processed, scraped_date FROM articles ORDER BY scraped_date DESC LIMIT 5",
         fetch=True
     )
     
-    for article in recent_articles:
-        title, source, url, summary, scraped_date = article
+    if recent_articles:
+        for article in recent_articles:
+            title, source, url, summary, key_points, processed, scraped_date = article
+            
+            with st.container():
+                col1, col2 = st.columns([4, 1])
+                
+                with col1:
+                    status_icon = "✅" if processed else "❌"
+                    st.markdown(f"**{status_icon} {title}**")
+                    st.markdown(f"*Source: {source} | Scraped: {scraped_date}*")
+                    
+                    if processed and summary:
+                        # Show first part of summary
+                        preview = summary[:200] + "..." if len(summary) > 200 else summary
+                        st.markdown(f"📋 **Summary:** {preview}")
+                        
+                        # Show if we have comprehensive analysis
+                        if key_points and ("🎯" in key_points or "🔧" in key_points):
+                            st.markdown("🔍 *Comprehensive cybersecurity analysis available*")
+                    elif not processed:
+                        st.markdown("🤖 *Ready for AI analysis*")
+                
+                with col2:
+                    st.markdown(f"[📖 Read Full]({url})")
+                    if processed:
+                        st.markdown("✅ Analyzed")
+                    else:
+                        st.markdown("⏳ Pending")
+                
+                st.divider()
+    else:
+        st.info("No articles found. Click 'Scrape Now' to find cybersecurity articles.")
+    
+    # Processing stats
+    if stats['total'] > 0:
+        st.subheader("📊 Processing Statistics")
         
-        with st.expander(f"{title} ({source})"):
-            st.markdown(f"**Scraped:** {scraped_date}")
-            if summary:
-                st.markdown(f"**Summary:** {summary[:300]}...")
-            st.markdown(f"[Read Full Article]({url})")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            processing_rate = (stats['processed'] / stats['total']) * 100
+            st.metric(
+                "Processing Rate", 
+                f"{processing_rate:.1f}%",
+                help="Percentage of articles that have been analyzed with AI"
+            )
+        
+        with col2:
+            unprocessed_count = stats['total'] - stats['processed']
+            st.metric(
+                "Pending Analysis", 
+                unprocessed_count,
+                help="Number of articles waiting for AI analysis"
+            )
 
 def show_system_status(db):
     """Show system status and tests"""
@@ -580,16 +682,108 @@ def show_system_status(db):
         status = "✅" if os.environ.get(var) else "❌"
         st.markdown(f"{status} **{var}** - {description}")
     
-    # Connection tests
-    st.subheader("Service Tests")
+    # Connection tests with enhanced display
+    st.subheader("🔬 Service Tests")
     
     if st.button("🧪 Test All Connections"):
         with st.spinner("Testing connections..."):
             results = test_connections()
             
+            st.markdown("### Test Results:")
+            
             for service, result in results.items():
                 status_icon = "✅" if result['status'] else "❌"
-                st.markdown(f"{status_icon} **{service.title()}**: {result['message']}")
+                service_name = service.replace('_', ' ').title()
+                
+                with st.container():
+                    col1, col2 = st.columns([1, 3])
+                    
+                    with col1:
+                        st.markdown(f"**{status_icon} {service_name}**")
+                    
+                    with col2:
+                        st.markdown(f"**Status:** {result['message']}")
+                        
+                        # Show additional details if available
+                        if 'model' in result:
+                            st.markdown(f"**Model:** {result['model']}")
+                        if 'libraries' in result:
+                            st.markdown(f"**Libraries:** {result['libraries']}")
+                        if 'smtp' in result:
+                            st.markdown(f"**SMTP Server:** {result['smtp']}")
+                        if 'service' in result:
+                            st.markdown(f"**Service:** {result['service']}")
+                    
+                    st.divider()
+    
+    # Quick AI Analysis Test
+    st.subheader("🤖 AI Analysis Test")
+    
+    if ANTHROPIC_AVAILABLE and os.environ.get("ANTHROPIC_API_KEY"):
+        if st.button("🧠 Test AI Analysis"):
+            test_content = """
+            This is a test cybersecurity article about implementing zero-trust architecture.
+            Zero trust is a security framework that requires all users, whether in or outside 
+            the organization's network, to be authenticated, authorized, and continuously 
+            validated for security configuration and posture before being granted or keeping 
+            access to applications and data. This approach helps prevent data breaches and 
+            limits internal threat movement.
+            """
+            
+            with st.spinner("Testing AI analysis capabilities..."):
+                try:
+                    from ai_service import summarize_article
+                    summary, key_points = summarize_article(test_content, "Zero Trust Architecture Test")
+                    
+                    if summary and key_points:
+                        st.success("✅ AI Analysis Test Successful!")
+                        
+                        with st.expander("View Test Analysis Results"):
+                            st.markdown("**Summary:**")
+                            st.markdown(summary)
+                            st.markdown("**Analysis:**")
+                            st.markdown(key_points)
+                    else:
+                        st.error("❌ AI Analysis Test Failed - No results generated")
+                        
+                except Exception as e:
+                    st.error(f"❌ AI Analysis Test Failed: {str(e)}")
+    else:
+        st.warning("⚠️ AI Analysis not available - Configure ANTHROPIC_API_KEY")
+    
+    # System Information
+    st.subheader("📋 System Information")
+    
+    system_info = {
+        "Python Environment": "Streamlit Cloud",
+        "Database": "SQLite (Local)",
+        "AI Model": "Claude Sonnet (Anthropic)" if ANTHROPIC_AVAILABLE else "Not Available",
+        "Scraping": "Enabled" if SCRAPING_AVAILABLE else "Disabled",
+        "Notifications": "Email + WhatsApp" if os.environ.get("EMAIL_ADDRESS") and os.environ.get("TWILIO_ACCOUNT_SID") else "Partial/Disabled"
+    }
+    
+    for key, value in system_info.items():
+        st.markdown(f"**{key}:** {value}")
+    
+    # Performance metrics
+    st.subheader("⚡ Performance Metrics")
+    
+    # Get database stats
+    db = get_database()
+    total_articles = db.execute_query("SELECT COUNT(*) FROM articles", fetch=True)[0][0]
+    processed_articles = db.execute_query("SELECT COUNT(*) FROM articles WHERE processed = 1", fetch=True)[0][0]
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Articles Scraped", total_articles)
+    
+    with col2:
+        st.metric("Articles Analyzed", processed_articles)
+    
+    with col3:
+        processing_rate = (processed_articles / total_articles * 100) if total_articles > 0 else 0
+        st.metric("Analysis Rate", f"{processing_rate:.1f}%")
     
     # Recent logs
     st.subheader("Recent Scraping Logs")
@@ -604,7 +798,7 @@ def show_system_status(db):
         st.markdown(f"{status_icon} **{source}** ({timestamp}): {message}")
 
 def show_articles(db):
-    """Show articles with filtering"""
+    """Show articles with comprehensive analysis display"""
     st.header("📰 Articles")
     
     # Filters
@@ -621,7 +815,7 @@ def show_articles(db):
         search = st.text_input("Search")
     
     # Build query
-    query = "SELECT title, source, url, summary, key_points, processed FROM articles WHERE 1=1"
+    query = "SELECT id, title, source, url, summary, key_points, processed, scraped_date FROM articles WHERE 1=1"
     params = []
     
     if selected_source != "All":
@@ -637,24 +831,96 @@ def show_articles(db):
         query += " AND title LIKE ?"
         params.append(f"%{search}%")
     
-    query += " ORDER BY scraped_date DESC LIMIT 20"
+    query += " ORDER BY scraped_date DESC LIMIT 30"
     
     articles = db.execute_query(query, params, fetch=True)
     
-    # Display articles
+    if not articles:
+        st.info("No articles found matching your criteria.")
+        return
+    
+    # Display articles with enhanced formatting
     for article in articles:
-        title, source, url, summary, key_points, processed = article
+        article_id, title, source, url, summary, key_points, processed, scraped_date = article
         
-        with st.expander(f"{'✅' if processed else '❌'} {title} ({source})"):
-            st.markdown(f"**URL:** [Link]({url})")
+        # Create expandable article card
+        status_icon = "✅" if processed else "❌"
+        processed_text = "Analyzed" if processed else "Not Analyzed"
+        
+        with st.expander(f"{status_icon} {title} ({source}) - {processed_text}"):
+            # Article metadata
+            col1, col2, col3 = st.columns([2, 1, 1])
             
-            if summary:
-                st.markdown("**Summary:**")
+            with col1:
+                st.markdown(f"**Source:** {source}")
+                st.markdown(f"**Scraped:** {scraped_date}")
+            
+            with col2:
+                st.markdown(f"[🔗 Read Original]({url})")
+            
+            with col3:
+                if not processed and ANTHROPIC_AVAILABLE:
+                    if st.button("🤖 Analyze Now", key=f"analyze_{article_id}"):
+                        with st.spinner("Analyzing article..."):
+                            success, message = db.reprocess_single_article(article_id)
+                            if success:
+                                st.success("Article analyzed successfully!")
+                                st.rerun()
+                            else:
+                                st.error(f"Analysis failed: {message}")
+                elif processed:
+                    if st.button("🔄 Re-analyze", key=f"reanalyze_{article_id}"):
+                        with st.spinner("Re-analyzing article..."):
+                            success, message = db.reprocess_single_article(article_id)
+                            if success:
+                                st.success("Article re-analyzed successfully!")
+                                st.rerun()
+                            else:
+                                st.error(f"Re-analysis failed: {message}")
+            
+            # Show analysis if available
+            if processed and summary:
+                st.markdown("---")
+                
+                # Executive Summary
+                st.markdown("### 📋 Executive Summary")
                 st.markdown(summary)
+                
+                # Detailed Analysis
+                if key_points:
+                    st.markdown("### 🔍 Detailed Analysis")
+                    
+                    # Parse and display the structured key points
+                    sections = key_points.split('\n\n')
+                    
+                    for section in sections:
+                        if section.strip():
+                            lines = section.strip().split('\n')
+                            if lines:
+                                # Check if this is a section header
+                                if lines[0].startswith('🎯') or lines[0].startswith('🔧') or lines[0].startswith('✅') or lines[0].startswith('🚨') or lines[0].startswith('🛠️') or lines[0].startswith('📊'):
+                                    st.markdown(f"**{lines[0]}**")
+                                    
+                                    # Display the content of this section
+                                    for line in lines[1:]:
+                                        if line.strip():
+                                            if line.startswith('•'):
+                                                st.markdown(f"  {line}")
+                                            else:
+                                                st.markdown(line)
+                                else:
+                                    # Regular content
+                                    for line in lines:
+                                        if line.strip():
+                                            st.markdown(line)
+                            
+                            st.markdown("")  # Add spacing between sections
             
-            if key_points:
-                st.markdown("**Key Points:**")
-                st.markdown(key_points)
+            elif not processed:
+                st.info("🤖 This article hasn't been analyzed yet. Click 'Analyze Now' to get comprehensive cybersecurity insights.")
+            
+            else:
+                st.warning("⚠️ Analysis data appears to be incomplete. Try re-analyzing this article.")
 
 def show_sources(db):
     """Manage blog sources"""
