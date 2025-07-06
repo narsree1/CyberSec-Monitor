@@ -79,7 +79,7 @@ Please provide a thorough analysis in JSON format with the following structure:
 Focus on providing practical, actionable insights that a cybersecurity analyst can use immediately. Include specific details about methodologies, tools, and techniques. Don't summarize - analyze and extract value."""
         
         response = anthropic_client.messages.create(
-            model="claude-3-sonnet-20240229",  # Using Sonnet for better analysis
+            model="claude-3-haiku-20240307",  # Using Sonnet for better analysis
             max_tokens=2000,  # Increased for comprehensive analysis
             temperature=0.2,  # Lower temperature for more focused analysis
             system="You are a senior cybersecurity consultant who specializes in analyzing technical articles and extracting actionable insights for cybersecurity analysts. Always provide comprehensive, detailed analysis in valid JSON format.",
