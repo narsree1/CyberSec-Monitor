@@ -42,11 +42,11 @@ except ImportError as e:
     MISSING_IMPORTS.append("Flask/SQLAlchemy")
 
 try:
-    import openai
-    OPENAI_AVAILABLE = True
+    import anthropic
+    ANTHROPIC_AVAILABLE = True
 except ImportError:
-    OPENAI_AVAILABLE = False
-    MISSING_IMPORTS.append("OpenAI")
+    ANTHROPIC_AVAILABLE = False
+    MISSING_IMPORTS.append("Anthropic")
 
 try:
     import requests
@@ -229,7 +229,7 @@ def show_system_requirements():
         
         st.markdown("### Environment Variables Needed:")
         env_vars = [
-            "OPENAI_API_KEY - For AI article summarization",
+            "ANTHROPIC_API_KEY - For AI article summarization",
             "EMAIL_ADDRESS - For email notifications", 
             "EMAIL_PASSWORD - For email notifications",
             "TWILIO_ACCOUNT_SID - For WhatsApp notifications",
@@ -285,7 +285,7 @@ def show_system_status():
         st.markdown("### Dependencies")
         deps = [
             ("Flask/SQLAlchemy", FLASK_AVAILABLE),
-            ("OpenAI", OPENAI_AVAILABLE),
+            ("Anthropic", ANTHROPIC_AVAILABLE),
             ("Web Scraping", SCRAPING_AVAILABLE),
             ("Twilio", TWILIO_AVAILABLE)
         ]
@@ -297,7 +297,7 @@ def show_system_status():
     with col2:
         st.markdown("### Environment Variables")
         env_vars = [
-            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
             "EMAIL_ADDRESS",
             "EMAIL_PASSWORD",
             "TWILIO_ACCOUNT_SID"
@@ -319,10 +319,10 @@ def show_system_status():
         
         with col2:
             if st.button("🤖 Test AI Processing"):
-                if OPENAI_AVAILABLE and os.environ.get("OPENAI_API_KEY"):
-                    st.success("OpenAI configuration ready")
+                if ANTHROPIC_AVAILABLE and os.environ.get("ANTHROPIC_API_KEY"):
+                    st.success("Anthropic configuration ready")
                 else:
-                    st.error("OpenAI not configured")
+                    st.error("Anthropic not configured")
         
         with col3:
             if st.button("📧 Test Notifications"):
