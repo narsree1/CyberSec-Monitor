@@ -6,7 +6,6 @@ port = 8501
 
 [browser]
 gatherUsageStats = false
-showErrorDetails = true
 
 [theme]
 primaryColor = "#3b82f6"
