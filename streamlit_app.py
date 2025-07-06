@@ -387,23 +387,29 @@ class BlogMonitorDB:
             return 0
         
         try:
-            from ai_service import summarize_article
+            # Import here to avoid issues
+            import sys
+            sys.path.append('.')
+            
+            # Try to import the AI service
+            try:
+                from ai_service import summarize_article
+            except ImportError:
+                # If import fails, define a simple version inline
+                logger.warning("Could not import ai_service, using inline version")
+                return self.process_articles_inline()
             
             unprocessed = self.execute_query(
-                "SELECT id, title, content FROM articles WHERE processed = 0 AND content IS NOT NULL",
+                "SELECT id, title, content FROM articles WHERE processed = 0 AND content IS NOT NULL AND length(trim(content)) > 200",
                 fetch=True
             )
             
+            if not unprocessed:
+                logger.info("No unprocessed articles found")
+                return 0
+            
             processed_count = 0
             for article_id, title, content in unprocessed:
-                if len(content.strip()) < 200:  # Increased minimum content length
-                    # Mark as processed even if too short
-                    self.execute_query(
-                        "UPDATE articles SET processed = 1 WHERE id = ?",
-                        (article_id,)
-                    )
-                    continue
-                
                 try:
                     logger.info(f"Processing with AI: {title}")
                     summary, key_points = summarize_article(content, title)
@@ -415,18 +421,163 @@ class BlogMonitorDB:
                         )
                         processed_count += 1
                         logger.info(f"Successfully processed: {title}")
-                        time.sleep(2)  # Increased rate limiting for Sonnet
+                        time.sleep(2)  # Rate limiting
                     else:
                         logger.error(f"No analysis generated for: {title}")
+                        # Mark as processed to avoid retry loops
+                        self.execute_query(
+                            "UPDATE articles SET processed = 1 WHERE id = ?",
+                            (article_id,)
+                        )
                     
                 except Exception as e:
                     logger.error(f"Error processing article {title}: {e}")
+                    # Mark as processed on error to avoid retry loops
+                    self.execute_query(
+                        "UPDATE articles SET processed = 1 WHERE id = ?",
+                        (article_id,)
+                    )
             
             logger.info(f"Processed {processed_count} articles with comprehensive AI analysis")
             return processed_count
             
-        except ImportError:
-            logger.error("ai_service module not available")
+        except Exception as e:
+            logger.error(f"Error in AI processing: {e}")
+            return 0
+    
+    def process_articles_inline(self):
+        """Inline AI processing when ai_service import fails"""
+        if not ANTHROPIC_AVAILABLE or not os.environ.get("ANTHROPIC_API_KEY"):
+            return 0
+        
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+            
+            # Try different models
+            models_to_try = [
+                "claude-3-5-sonnet-20241022",
+                "claude-3-5-sonnet-20240620", 
+                "claude-3-haiku-20240307"
+            ]
+            
+            working_model = None
+            for model in models_to_try:
+                try:
+                    test_response = client.messages.create(
+                        model=model,
+                        max_tokens=10,
+                        messages=[{"role": "user", "content": "test"}]
+                    )
+                    working_model = model
+                    logger.info(f"Using model: {model}")
+                    break
+                except Exception as e:
+                    logger.warning(f"Model {model} not available: {e}")
+                    continue
+            
+            if not working_model:
+                logger.error("No working Claude models found")
+                return 0
+            
+            unprocessed = self.execute_query(
+                "SELECT id, title, content FROM articles WHERE processed = 0 AND content IS NOT NULL",
+                fetch=True
+            )
+            
+            processed_count = 0
+            for article_id, title, content in unprocessed:
+                if len(content.strip()) < 200:
+                    # Mark short articles as processed
+                    self.execute_query(
+                        "UPDATE articles SET processed = 1 WHERE id = ?",
+                        (article_id,)
+                    )
+                    continue
+                
+                try:
+                    # Simple analysis prompt
+                    prompt = f"""Analyze this cybersecurity article for a security analyst:
+
+Title: {title}
+Content: {content[:8000]}
+
+Provide a JSON response with:
+{{
+    "summary": "2-3 paragraph executive summary",
+    "key_takeaways": ["takeaway 1", "takeaway 2", "takeaway 3"],
+    "technical_details": "technical explanation",
+    "actionable_items": ["action 1", "action 2"],
+    "relevance_score": "score 1-10 with explanation"
+}}"""
+                    
+                    response = client.messages.create(
+                        model=working_model,
+                        max_tokens=1500,
+                        temperature=0.3,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    
+                    response_text = response.content[0].text
+                    
+                    # Try to parse JSON
+                    try:
+                        import json
+                        result = json.loads(response_text)
+                        
+                        summary = result.get("summary", "Analysis completed")
+                        
+                        # Format key points
+                        sections = []
+                        if result.get("key_takeaways"):
+                            sections.append("🎯 **KEY TAKEAWAYS:**")
+                            for item in result["key_takeaways"]:
+                                sections.append(f"• {item}")
+                            sections.append("")
+                        
+                        if result.get("technical_details"):
+                            sections.append("🔧 **TECHNICAL DETAILS:**")
+                            sections.append(result["technical_details"])
+                            sections.append("")
+                        
+                        if result.get("actionable_items"):
+                            sections.append("✅ **ACTIONABLE ITEMS:**")
+                            for item in result["actionable_items"]:
+                                sections.append(f"• {item}")
+                            sections.append("")
+                        
+                        if result.get("relevance_score"):
+                            sections.append(f"📊 **RELEVANCE SCORE:** {result['relevance_score']}")
+                        
+                        key_points = "\n".join(sections)
+                        
+                    except json.JSONDecodeError:
+                        # Fallback if JSON parsing fails
+                        summary = f"AI Analysis of: {title}"
+                        key_points = f"🤖 **AI ANALYSIS:**\n{response_text[:1000]}..."
+                    
+                    # Save results
+                    self.execute_query(
+                        "UPDATE articles SET summary = ?, key_points = ?, processed = 1 WHERE id = ?",
+                        (summary, key_points, article_id)
+                    )
+                    
+                    processed_count += 1
+                    logger.info(f"Processed: {title}")
+                    time.sleep(2)  # Rate limiting
+                    
+                except Exception as e:
+                    logger.error(f"Error processing {title}: {e}")
+                    # Mark as processed to avoid retry
+                    self.execute_query(
+                        "UPDATE articles SET processed = 1 WHERE id = ?",
+                        (article_id,)
+                    )
+            
+            return processed_count
+            
+        except Exception as e:
+            logger.error(f"Inline processing error: {e}")
             return 0
     
     def reprocess_single_article(self, article_id):
@@ -547,16 +698,70 @@ def show_dashboard(db):
     
     with col2:
         if st.button("🤖 Process AI", type="secondary"):
-            if ANTHROPIC_AVAILABLE:
+            if ANTHROPIC_AVAILABLE and os.environ.get("ANTHROPIC_API_KEY"):
                 with st.spinner("Processing with AI..."):
-                    count = db.process_articles_with_ai()
-                    if count > 0:
-                        st.success(f"Processed {count} articles!")
-                        st.rerun()
+                    # First check if there are articles to process
+                    unprocessed_count = db.execute_query(
+                        "SELECT COUNT(*) FROM articles WHERE processed = 0", 
+                        fetch=True
+                    )[0][0]
+                    
+                    if unprocessed_count == 0:
+                        st.info("No unprocessed articles found")
                     else:
-                        st.info("No articles to process")
+                        st.info(f"Found {unprocessed_count} articles to process...")
+                        count = db.process_articles_with_ai()
+                        if count > 0:
+                            st.success(f"Processed {count} articles!")
+                            st.rerun()
+                        else:
+                            st.error("Processing failed - check logs")
             else:
-                st.error("Anthropic not available")
+                st.error("Anthropic not available - check API key")
+    
+    with col3:
+        # Debug info
+        if st.button("🔍 Debug Info"):
+            with st.expander("Debug Information", expanded=True):
+                # Check unprocessed articles
+                unprocessed = db.execute_query(
+                    "SELECT id, title, length(content), processed FROM articles ORDER BY id DESC LIMIT 5",
+                    fetch=True
+                )
+                
+                st.markdown("**Recent Articles Status:**")
+                for article in unprocessed:
+                    article_id, title, content_length, processed = article
+                    status = "✅ Processed" if processed else "❌ Unprocessed"
+                    st.markdown(f"- {title[:50]}... | Content: {content_length} chars | {status}")
+                
+                # Check API key
+                api_key_configured = bool(os.environ.get("ANTHROPIC_API_KEY"))
+                st.markdown(f"**API Key Configured:** {'✅' if api_key_configured else '❌'}")
+                
+                # Check libraries
+                st.markdown(f"**Anthropic Available:** {'✅' if ANTHROPIC_AVAILABLE else '❌'}")
+                
+                if api_key_configured and ANTHROPIC_AVAILABLE:
+                    if st.button("🧪 Test Single Article"):
+                        # Get first unprocessed article
+                        test_article = db.execute_query(
+                            "SELECT id, title, content FROM articles WHERE processed = 0 LIMIT 1",
+                            fetch=True
+                        )
+                        
+                        if test_article:
+                            article_id, title, content = test_article[0]
+                            
+                            with st.spinner(f"Testing analysis on: {title}"):
+                                success, message = db.reprocess_single_article(article_id)
+                                if success:
+                                    st.success("✅ Test analysis successful!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ Test failed: {message}")
+                        else:
+                            st.info("No unprocessed articles to test")
     
     # Statistics
     stats = {
