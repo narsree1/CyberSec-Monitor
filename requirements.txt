@@ -1,12 +1,7 @@
 # Core web framework
-streamlit>=1.46.0
-flask>=3.0.0
-flask-sqlalchemy>=3.1.0
+streamlit>=1.28.0
 
-# Database
-sqlalchemy>=2.0.0
-
-# AI/ML - CHANGED FROM OPENAI TO ANTHROPIC
+# AI/ML - Using Anthropic instead of OpenAI
 anthropic>=0.34.0
 
 # Web scraping and content extraction
@@ -15,10 +10,10 @@ beautifulsoup4>=4.12.0
 feedparser>=6.0.11
 trafilatura>=1.13.0
 
-# Notifications
+# Notifications (optional)
 twilio>=9.0.0
 
-# Scheduling
+# Scheduling (for background tasks)
 apscheduler>=3.10.0
 
 # Data processing
@@ -27,6 +22,3 @@ python-dateutil>=2.9.0
 
 # Environment and configuration
 python-dotenv>=1.0.0
-
-# Utility
-werkzeug>=3.0.0
