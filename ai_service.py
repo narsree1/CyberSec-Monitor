@@ -1,188 +1,183 @@
 import os
-import json
 import logging
 from anthropic import Anthropic
 from datetime import datetime
+import re
 
 logger = logging.getLogger(__name__)
 
 # Initialize Anthropic client
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-if not ANTHROPIC_API_KEY:
-    logger.warning("ANTHROPIC_API_KEY not found in environment variables")
-
 anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
-def get_db():
-    """Get database instance - compatible with both Flask and Streamlit"""
+def clean_text(text):
+    """Clean text to remove problematic characters"""
+    if not text:
+        return text
+    
+    # Remove control characters that break JSON
+    cleaned = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', text)
+    # Replace multiple spaces with single space
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    return cleaned.strip()
+
+def summarize_article(content, title=""):
+    """
+    Provide analysis of cybersecurity articles - simplified version
+    """
+    if not anthropic_client:
+        logger.error("Anthropic client not initialized")
+        return None, None
+    
     try:
-        # Try Flask app context first
+        # Limit content length
+        if len(content) > 8000:
+            content = content[:8000] + "..."
+        
+        # Simple prompt that avoids JSON formatting issues
+        prompt = f"""Analyze this cybersecurity article for a security analyst:
+
+Title: {title}
+
+Content: {content}
+
+Please provide:
+1. A 2-3 paragraph executive summary
+2. 3-5 key takeaways for cybersecurity professionals
+3. Technical details worth noting
+4. Actionable items for implementation
+5. Relevance score (1-10) for cybersecurity analysts
+
+Format your response as plain text, not JSON."""
+        
+        # Try multiple models
+        models = ["claude-3-5-sonnet-20241022", "claude-3-haiku-20240307"]
+        
+        for model in models:
+            try:
+                response = anthropic_client.messages.create(
+                    model=model,
+                    max_tokens=1500,
+                    temperature=0.3,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                
+                response_text = response.content[0].text
+                
+                # Clean the response
+                cleaned_response = clean_text(response_text)
+                
+                # Parse the plain text response
+                summary = ""
+                key_points = ""
+                
+                # Extract sections from the response
+                lines = cleaned_response.split('\n')
+                current_section = ""
+                
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    # Look for section headers
+                    if any(keyword in line.lower() for keyword in ['summary', 'executive']):
+                        current_section = "summary"
+                        continue
+                    elif any(keyword in line.lower() for keyword in ['takeaway', 'key points', 'insights']):
+                        current_section = "takeaways"
+                        key_points += "\n🎯 **KEY TAKEAWAYS:**\n"
+                        continue
+                    elif any(keyword in line.lower() for keyword in ['technical', 'details']):
+                        current_section = "technical"
+                        key_points += "\n🔧 **TECHNICAL DETAILS:**\n"
+                        continue
+                    elif any(keyword in line.lower() for keyword in ['actionable', 'action', 'implementation']):
+                        current_section = "actionable"
+                        key_points += "\n✅ **ACTIONABLE ITEMS:**\n"
+                        continue
+                    elif any(keyword in line.lower() for keyword in ['relevance', 'score']):
+                        current_section = "relevance"
+                        key_points += "\n📊 **RELEVANCE SCORE:**\n"
+                        continue
+                    
+                    # Add content to appropriate section
+                    if current_section == "summary":
+                        summary += line + " "
+                    elif current_section in ["takeaways", "technical", "actionable", "relevance"]:
+                        if line.startswith(('•', '-', '1.', '2.', '3.', '4.', '5.')):
+                            key_points += f"• {line.lstrip('•-123456789. ')}\n"
+                        else:
+                            key_points += f"{line}\n"
+                
+                # Fallback if parsing didn't work well
+                if not summary:
+                    summary = f"Analysis of {title}: " + cleaned_response[:300] + "..."
+                
+                if not key_points:
+                    key_points = f"🤖 **ANALYSIS:**\n{cleaned_response[:800]}...\n\n📊 **STATUS:** Analysis completed successfully"
+                
+                logger.info(f"Successfully analyzed using {model}: {title}")
+                return summary.strip(), key_points.strip()
+                
+            except Exception as e:
+                logger.warning(f"Model {model} failed: {e}")
+                continue
+        
+        logger.error("All models failed")
+        return None, None
+        
+    except Exception as e:
+        logger.error(f"Error in analysis: {e}")
+        return None, None
+
+def test_anthropic_connection():
+    """Test Anthropic connection"""
+    if not anthropic_client:
+        return False, "Anthropic API key not configured"
+    
+    try:
+        response = anthropic_client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=50,
+            messages=[{"role": "user", "content": "Hello, test connection"}]
+        )
+        return True, f"Connection successful: {response.content[0].text[:50]}..."
+    except Exception as e:
+        return False, f"Connection failed: {str(e)}"
+
+# Compatibility functions for Flask mode
+def get_db():
+    try:
         from app import db
         return db
     except (ImportError, RuntimeError):
-        # Fall back to simple database for Streamlit
         return None
 
 def get_article_model():
-    """Get Article model - compatible with both Flask and Streamlit"""
     try:
         from models import Article
         return Article
     except ImportError:
         return None
 
-def summarize_article(content, title=""):
-    """
-    Provide comprehensive analysis of cybersecurity articles for security analysts
-    """
-    if not anthropic_client:
-        logger.error("Anthropic client not initialized - API key missing")
-        return None, None
-    
-    try:
-        # Use a more generous content length for Claude Sonnet
-        max_content_length = 15000
-        if len(content) > max_content_length:
-            # Try to keep the most important parts
-            content = content[:max_content_length] + "\n\n[Article content truncated for processing]"
-        
-        prompt = f"""As a cybersecurity expert, analyze this article comprehensively for a cybersecurity analyst. Provide detailed insights that would be valuable for their daily work and strategic understanding.
-
-Article Title: {title}
-
-Article Content:
-{content}
-
-Please provide a thorough analysis in JSON format with the following structure:
-
-{{
-    "executive_summary": "A comprehensive 3-4 paragraph summary that captures the essence, methodology, and implications of the article",
-    "key_takeaways": [
-        "Specific, actionable takeaway 1 that a cybersecurity analyst can apply",
-        "Technical insight or methodology that can be implemented", 
-        "Strategic implication for security programs",
-        "Tool, technique, or process mentioned that could be useful",
-        "Risk or threat insight that affects security posture"
-    ],
-    "technical_details": "Detailed explanation of any technical concepts, tools, methodologies, or frameworks discussed",
-    "actionable_items": [
-        "Specific action item 1 (e.g., 'Implement X tool for Y purpose')",
-        "Process improvement suggestion",
-        "Investigation technique to adopt",
-        "Security control to evaluate or implement"
-    ],
-    "threat_intelligence": "Any threat intelligence, attack techniques, vulnerabilities, or security risks mentioned",
-    "tools_and_resources": "List of tools, frameworks, resources, or references mentioned that could be useful",
-    "relevance_score": "Score from 1-10 indicating how relevant this is for a cybersecurity analyst, with brief explanation"
-}}
-
-Focus on providing practical, actionable insights that a cybersecurity analyst can use immediately. Include specific details about methodologies, tools, and techniques. Don't summarize - analyze and extract value."""
-        
-        response = anthropic_client.messages.create(
-            model="claude-3-haiku-20240307",  # Using Sonnet for better analysis
-            max_tokens=2000,  # Increased for comprehensive analysis
-            temperature=0.2,  # Lower temperature for more focused analysis
-            system="You are a senior cybersecurity consultant who specializes in analyzing technical articles and extracting actionable insights for cybersecurity analysts. Always provide comprehensive, detailed analysis in valid JSON format.",
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
-        )
-        
-        # Extract content from Claude's response
-        response_text = response.content[0].text
-        
-        # Parse JSON response
-        try:
-            result = json.loads(response_text)
-        except json.JSONDecodeError:
-            # If JSON parsing fails, try to extract the JSON from the response
-            import re
-            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group())
-            else:
-                raise
-        
-        # Format the comprehensive summary
-        summary = result.get("executive_summary", "")
-        
-        # Format key takeaways and other sections
-        sections = []
-        
-        if result.get("key_takeaways"):
-            sections.append("🎯 **KEY TAKEAWAYS:**")
-            for takeaway in result["key_takeaways"]:
-                sections.append(f"• {takeaway}")
-            sections.append("")
-        
-        if result.get("technical_details"):
-            sections.append("🔧 **TECHNICAL DETAILS:**")
-            sections.append(result["technical_details"])
-            sections.append("")
-        
-        if result.get("actionable_items"):
-            sections.append("✅ **ACTIONABLE ITEMS:**")
-            for item in result["actionable_items"]:
-                sections.append(f"• {item}")
-            sections.append("")
-        
-        if result.get("threat_intelligence"):
-            sections.append("🚨 **THREAT INTELLIGENCE:**")
-            sections.append(result["threat_intelligence"])
-            sections.append("")
-        
-        if result.get("tools_and_resources"):
-            sections.append("🛠️ **TOOLS & RESOURCES:**")
-            sections.append(result["tools_and_resources"])
-            sections.append("")
-        
-        if result.get("relevance_score"):
-            sections.append(f"📊 **RELEVANCE SCORE:** {result['relevance_score']}")
-        
-        key_points = "\n".join(sections)
-        
-        return summary, key_points
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"Error parsing Claude JSON response: {e}")
-        logger.error(f"Raw response: {response_text[:500]}...")
-        return None, None
-    except Exception as e:
-        logger.error(f"Error calling Claude API: {e}")
-        return None, None
-
 def process_new_articles():
-    """Process unprocessed articles for comprehensive analysis"""
-    logger.info("Processing new articles for comprehensive analysis...")
-    
+    """Process unprocessed articles"""
     db = get_db()
     Article = get_article_model()
     
     if not db or not Article:
-        logger.error("Database or Article model not available")
         return 0
     
-    # Get unprocessed articles
     unprocessed_articles = Article.query.filter_by(processed=False).all()
-    
-    if not unprocessed_articles:
-        logger.info("No new articles to process")
-        return 0
-    
     processed_count = 0
+    
     for article in unprocessed_articles:
+        if not article.content or len(article.content.strip()) < 200:
+            article.processed = True
+            continue
+        
         try:
-            if not article.content or len(article.content.strip()) < 200:
-                logger.warning(f"Skipping article with insufficient content: {article.title}")
-                article.processed = True
-                continue
-            
-            logger.info(f"Processing article: {article.title}")
-            
-            # Generate comprehensive analysis
             summary, key_points = summarize_article(article.content, article.title)
             
             if summary and key_points:
@@ -190,82 +185,21 @@ def process_new_articles():
                 article.key_points = key_points
                 article.processed = True
                 processed_count += 1
-                logger.info(f"Successfully processed: {article.title}")
             else:
-                logger.error(f"Failed to generate analysis for: {article.title}")
-                # Don't mark as processed if it's a rate limit issue
-                if summary is None and key_points is None:
-                    # Likely an API error, don't mark as processed
-                    continue
-                else:
-                    article.processed = True
+                article.processed = True  # Mark as processed to avoid retry loops
             
             db.session.commit()
             
-            # Add delay to avoid rate limits
-            import time
-            time.sleep(2)  # Increased delay for Sonnet
-            
         except Exception as e:
-            db.session.rollback()
-            logger.error(f"Error processing article {article.title}: {e}")
-            # Only mark as processed if it's not a rate limit error
-            if "rate limit" not in str(e).lower() and "429" not in str(e):
-                article.processed = True
-                db.session.commit()
-    
-    logger.info(f"Processed {processed_count} articles successfully")
-    
-    # Send notifications for processed articles
-    if processed_count > 0:
-        try:
-            from notification_service import send_notifications_for_new_articles
-            send_notifications_for_new_articles()
-        except ImportError:
-            logger.warning("Notification service not available")
+            logger.error(f"Error processing {article.title}: {e}")
+            article.processed = True
+            db.session.commit()
     
     return processed_count
 
-def process_single_article_comprehensive(article_id, title, content):
-    """Process a single article with comprehensive analysis"""
-    if not content or len(content.strip()) < 200:
-        return None, None
-    
-    logger.info(f"Processing single article: {title}")
-    
-    try:
-        summary, key_points = summarize_article(content, title)
-        
-        if summary and key_points:
-            logger.info(f"Successfully analyzed: {title}")
-            return summary, key_points
-        else:
-            logger.error(f"Failed to analyze: {title}")
-            return None, None
-            
-    except Exception as e:
-        logger.error(f"Error analyzing article {title}: {e}")
-        return None, None
-
-def test_anthropic_connection():
-    """Test Anthropic API connection with comprehensive output"""
-    if not anthropic_client:
-        return False, "Anthropic API key not configured"
-    
-    try:
-        response = anthropic_client.messages.create(
-            model="claude-3-haiku-20240307",
-            max_tokens=100,
-            messages=[{"role": "user", "content": "Hello, this is a test of the cybersecurity article analysis system. Please confirm you can provide detailed technical analysis."}]
-        )
-        return True, f"Claude Sonnet connection successful: {response.content[0].text[:100]}..."
-    except Exception as e:
-        return False, f"Claude connection failed: {str(e)}"
-
 def reprocess_article(article_id, db_instance=None):
-    """Reprocess a specific article with enhanced analysis"""
+    """Reprocess a single article"""
     if db_instance:
-        # For Streamlit usage
         article_data = db_instance.execute_query(
             "SELECT title, content FROM articles WHERE id = ?",
             (article_id,),
@@ -276,7 +210,7 @@ def reprocess_article(article_id, db_instance=None):
             return False, "Article not found"
         
         title, content = article_data[0]
-        summary, key_points = process_single_article_comprehensive(article_id, title, content)
+        summary, key_points = summarize_article(content, title)
         
         if summary and key_points:
             db_instance.execute_query(
