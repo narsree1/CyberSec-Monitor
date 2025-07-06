@@ -6,7 +6,7 @@ flask-sqlalchemy>=3.1.0
 # Database
 sqlalchemy>=2.0.0
 
-# AI/ML
+# AI/ML - CHANGED FROM OPENAI TO ANTHROPIC
 anthropic>=0.34.0
 
 # Web scraping and content extraction
