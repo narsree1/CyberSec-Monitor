@@ -1,71 +1,69 @@
 import os
 import json
 import logging
-from openai import OpenAI
+from anthropic import Anthropic
 from app import db
 from models import Article
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# Initialize OpenAI client
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    logger.warning("OPENAI_API_KEY not found in environment variables")
+# Initialize Anthropic client
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+if not ANTHROPIC_API_KEY:
+    logger.warning("ANTHROPIC_API_KEY not found in environment variables")
 
-openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
 def summarize_article(content, title=""):
     """
-    Summarize article content using OpenAI GPT-4o
-    # the newest OpenAI model is "gpt-4o" which was released May 13, 2024.
-    do not change this unless explicitly requested by the user
+    Summarize article content using Claude Haiku
     """
-    if not openai_client:
-        logger.error("OpenAI client not initialized - API key missing")
+    if not anthropic_client:
+        logger.error("Anthropic client not initialized - API key missing")
         return None, None
     
     try:
-        # Truncate content if too long (to avoid token limits)
+        # Truncate content if too long (Claude Haiku has context limits)
         max_content_length = 8000
         if len(content) > max_content_length:
             content = content[:max_content_length] + "..."
         
-        prompt = f"""
-        Please analyze the following cybersecurity article and provide:
-        1. A concise summary (2-3 paragraphs)
-        2. Key points that a cybersecurity professional should know (3-5 bullet points)
+        prompt = f"""Please analyze the following cybersecurity article and provide:
+1. A concise summary (2-3 paragraphs)
+2. Key points that a cybersecurity professional should know (3-5 bullet points)
+
+Article Title: {title}
+
+Article Content:
+{content}
+
+Please format your response as JSON with the following structure:
+{{
+    "summary": "Your summary here",
+    "key_points": ["Point 1", "Point 2", "Point 3"]
+}}
+
+Focus on actionable insights, new threats, techniques, and important security implications."""
         
-        Article Title: {title}
-        
-        Article Content:
-        {content}
-        
-        Please format your response as JSON with the following structure:
-        {{
-            "summary": "Your summary here",
-            "key_points": ["Point 1", "Point 2", "Point 3"]
-        }}
-        """
-        
-        response = openai_client.chat.completions.create(
-            model="gpt-4o",
+        response = anthropic_client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=1000,
+            temperature=0.3,
+            system="You are a cybersecurity expert who specializes in summarizing technical articles for other security professionals. Always respond with valid JSON format.",
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are a cybersecurity expert who specializes in summarizing technical articles for other security professionals. Focus on actionable insights, new threats, techniques, and important security implications."
-                },
                 {
                     "role": "user",
                     "content": prompt
                 }
-            ],
-            response_format={"type": "json_object"},
-            max_tokens=1000,
-            temperature=0.3
+            ]
         )
         
-        result = json.loads(response.choices[0].message.content)
+        # Extract content from Claude's response
+        response_text = response.content[0].text
+        
+        # Parse JSON response
+        result = json.loads(response_text)
         summary = result.get("summary", "")
         key_points = result.get("key_points", [])
         
@@ -75,10 +73,10 @@ def summarize_article(content, title=""):
         return summary, key_points_str
         
     except json.JSONDecodeError as e:
-        logger.error(f"Error parsing OpenAI JSON response: {e}")
+        logger.error(f"Error parsing Claude JSON response: {e}")
         return None, None
     except Exception as e:
-        logger.error(f"Error calling OpenAI API: {e}")
+        logger.error(f"Error calling Claude API: {e}")
         return None, None
 
 def process_new_articles():
@@ -121,7 +119,7 @@ def process_new_articles():
             
             # Add delay to avoid rate limits
             import time
-            time.sleep(2)
+            time.sleep(1)  # Claude Haiku is faster, so reduced delay
             
         except Exception as e:
             db.session.rollback()
@@ -140,17 +138,17 @@ def process_new_articles():
     
     return processed_count
 
-def test_openai_connection():
-    """Test OpenAI API connection"""
-    if not openai_client:
-        return False, "OpenAI API key not configured"
+def test_anthropic_connection():
+    """Test Anthropic API connection"""
+    if not anthropic_client:
+        return False, "Anthropic API key not configured"
     
     try:
-        response = openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "Hello, this is a test."}],
-            max_tokens=10
+        response = anthropic_client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=10,
+            messages=[{"role": "user", "content": "Hello, this is a test."}]
         )
-        return True, "OpenAI connection successful"
+        return True, "Claude connection successful"
     except Exception as e:
-        return False, f"OpenAI connection failed: {str(e)}"
+        return False, f"Claude connection failed: {str(e)}"
